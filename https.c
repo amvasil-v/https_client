@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <netdb.h>
+#include <sys/types.h>
 
 #include "ca_cert.h"
 #include "https.h"
@@ -24,7 +25,7 @@ static int parse_url(char *src_url, int *https, char *host, char *port, char *ur
 static int http_header(HTTP_INFO *hi, char *param);
 static int http_parse(HTTP_INFO *hi);
 
-static int https_init(HTTP_INFO *hi, BOOL https, BOOL verify);
+static int https_init(HTTP_INFO *hi, BOOL https, BOOL verify, netio_t *io);
 static int https_close(HTTP_INFO *hi);
 static int https_connect(HTTP_INFO *hi, char *host, char *port);
 static int https_write(HTTP_INFO *hi, char *buffer, int len);
@@ -400,7 +401,7 @@ static int http_parse(HTTP_INFO *hi)
 }
 
 /*---------------------------------------------------------------------*/
-static int https_init(HTTP_INFO *hi, BOOL https, BOOL verify)
+static int https_init(HTTP_INFO *hi, BOOL https, BOOL verify, netio_t *io)
 {
     memset(hi, 0, sizeof(HTTP_INFO));
 
@@ -412,7 +413,9 @@ static int https_init(HTTP_INFO *hi, BOOL https, BOOL verify)
         mbedtls_ctr_drbg_init( &hi->tls.ctr_drbg );
     }
 
-    mbedtls_net_init(&hi->tls.ssl_fd);
+    hi->tls.io = io;
+
+    mbedtls_ssl_set_bio(&hi->tls.ssl, io, io->send, NULL, io->recv_timeout);
 
     hi->tls.verify = verify;
     hi->url.https = https;
@@ -430,8 +433,6 @@ static int https_close(HTTP_INFO *hi)
         mbedtls_ssl_close_notify(&hi->tls.ssl);
     }
 
-    mbedtls_net_free( &hi->tls.ssl_fd );
-
     if(hi->url.https == 1)
     {
         mbedtls_x509_crt_free(&hi->tls.cacert);
@@ -444,116 +445,6 @@ static int https_close(HTTP_INFO *hi)
 //  printf("https_close ... \n");
 
     return 0;
-}
-
-/*
- * Initiate a TCP connection with host:port and the given protocol
- * waiting for timeout (ms)
- */
-static int mbedtls_net_connect_timeout( mbedtls_net_context *ctx, const char *host, const char *port,
-                                        int proto, uint32_t timeout )
-{
-    int ret;
-    struct addrinfo hints, *addr_list, *cur;
-
-
-    signal( SIGPIPE, SIG_IGN );
-
-    /* Do name resolution with both IPv6 and IPv4 */
-    memset( &hints, 0, sizeof( hints ) );
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = proto == MBEDTLS_NET_PROTO_UDP ? SOCK_DGRAM : SOCK_STREAM;
-    hints.ai_protocol = proto == MBEDTLS_NET_PROTO_UDP ? IPPROTO_UDP : IPPROTO_TCP;
-
-    if( getaddrinfo( host, port, &hints, &addr_list ) != 0 )
-        return( MBEDTLS_ERR_NET_UNKNOWN_HOST );
-
-    /* Try the sockaddrs until a connection succeeds */
-    ret = MBEDTLS_ERR_NET_UNKNOWN_HOST;
-    for( cur = addr_list; cur != NULL; cur = cur->ai_next )
-    {
-        ctx->fd = (int) socket( cur->ai_family, cur->ai_socktype,
-                                cur->ai_protocol );
-        if( ctx->fd < 0 )
-        {
-            ret = MBEDTLS_ERR_NET_SOCKET_FAILED;
-            continue;
-        }
-
-        if( mbedtls_net_set_nonblock( ctx ) < 0 )
-        {
-            close( ctx->fd );
-            ctx->fd = -1;
-            ret = MBEDTLS_ERR_NET_CONNECT_FAILED;
-            break;
-        }
-
-        if( connect( ctx->fd, cur->ai_addr, cur->ai_addrlen ) == 0 )
-        {
-            ret = 0;
-            break;
-        }
-        else if( errno == EINPROGRESS )
-        {
-            int            fd = (int)ctx->fd;
-            int            opt;
-            socklen_t      slen;
-            struct timeval tv;
-            fd_set         fds;
-
-            while(1)
-            {
-                FD_ZERO( &fds );
-                FD_SET( fd, &fds );
-
-                tv.tv_sec  = timeout / 1000;
-                tv.tv_usec = ( timeout % 1000 ) * 1000;
-
-                ret = select( fd+1, NULL, &fds, NULL, timeout == 0 ? NULL : &tv );
-                if( ret == -1 )
-                {
-                    if(errno == EINTR) continue;
-                }
-                else if( ret == 0 )
-                {
-                    close( fd );
-                    ctx->fd = -1;
-                    ret = MBEDTLS_ERR_NET_CONNECT_FAILED;
-                }
-                else
-                {
-                    ret = 0;
-
-                    slen = sizeof(int);
-                    if( (getsockopt(fd, SOL_SOCKET, SO_ERROR, (void *)&opt, &slen) == 0) && (opt > 0) )
-                    {
-                        close( fd );
-                        ctx->fd = -1;
-                        ret = MBEDTLS_ERR_NET_CONNECT_FAILED;
-                    }
-                }
-
-                break;
-            }
-
-            break;
-        }
-
-        close( ctx->fd );
-        ctx->fd = -1;
-        ret = MBEDTLS_ERR_NET_CONNECT_FAILED;
-    }
-
-    freeaddrinfo( addr_list );
-
-    if( (ret == 0) && (mbedtls_net_set_block( ctx ) < 0) )
-    {
-        close( ctx->fd );
-        ctx->fd = -1;
-        ret = MBEDTLS_ERR_NET_CONNECT_FAILED;
-    }
-
-    return( ret );
 }
 
 /*---------------------------------------------------------------------*/
@@ -610,7 +501,7 @@ static int https_connect(HTTP_INFO *hi, char *host, char *port)
         }
     }
 
-    ret = mbedtls_net_connect_timeout(&hi->tls.ssl_fd, host, port, MBEDTLS_NET_PROTO_TCP, 5000);
+    ret = hi->tls.io->connect(hi->tls.io, host, port);
     if( ret != 0 )
     {
         return ret;
@@ -618,7 +509,7 @@ static int https_connect(HTTP_INFO *hi, char *host, char *port)
 
     if(https == 1)
     {
-        mbedtls_ssl_set_bio(&hi->tls.ssl, &hi->tls.ssl_fd, mbedtls_net_send, mbedtls_net_recv, mbedtls_net_recv_timeout);
+        //mbedtls_ssl_set_bio(&hi->tls.ssl, &hi->tls.ssl_fd, mbedtls_net_send, mbedtls_net_recv, mbedtls_net_recv_timeout);
 
         while ((ret = mbedtls_ssl_handshake(&hi->tls.ssl)) != 0)
         {
@@ -648,7 +539,7 @@ static int https_write(HTTP_INFO *hi, char *buffer, int len)
         if(hi->url.https == 1)
             ret = mbedtls_ssl_write(&hi->tls.ssl, (u_char *)&buffer[slen], (size_t)(len-slen));
         else
-            ret = mbedtls_net_send(&hi->tls.ssl_fd, (u_char *)&buffer[slen], (size_t)(len-slen));
+            ret = hi->tls.io->send(hi->tls.io, (u_char *)&buffer[slen], (size_t)(len-slen));
 
         if(ret == MBEDTLS_ERR_SSL_WANT_WRITE) continue;
         else if(ret <= 0) return ret;
@@ -670,14 +561,14 @@ static int https_read(HTTP_INFO *hi, char *buffer, int len)
     }
     else
     {
-        return mbedtls_net_recv_timeout(&hi->tls.ssl_fd, (u_char *)buffer, (size_t)len, 5000);
+        return hi->tls.io->recv_timeout(hi->tls.io, (u_char *)buffer, (size_t)len, 5000);
     }
 }
 
 /*---------------------------------------------------------------------*/
-int http_init(HTTP_INFO *hi, BOOL verify)
+int http_init(HTTP_INFO *hi, BOOL verify, netio_t *io)
 {
-    return https_init(hi, 0, verify);
+    return https_init(hi, 0, verify, io);
 }
 
 /*---------------------------------------------------------------------*/
@@ -687,7 +578,7 @@ int http_close(HTTP_INFO *hi)
 }
 
 /*---------------------------------------------------------------------*/
-int http_get(HTTP_INFO *hi, char *url, char *response, int size)
+int http_get(HTTP_INFO *hi, char *url, char *response, int size, netio_t *io)
 {
     char        request[1024], err[100];
     char        host[256], port[10], dir[1024];
@@ -702,12 +593,12 @@ int http_get(HTTP_INFO *hi, char *url, char *response, int size)
 
     parse_url(url, &https, host, port, dir);
 
-    if( (hi->tls.ssl_fd.fd == -1) || (hi->url.https != https) ||
+    if( !hi->tls.io->opened(hi->tls.io) || (hi->url.https != https) ||
         (strcmp(hi->url.host, host) != 0) || (strcmp(hi->url.port, port) != 0) )
     {
         https_close(hi);
 
-        https_init(hi, https, verify);
+        https_init(hi, https, verify, io);
 
         if((ret=https_connect(hi, host, port)) < 0)
         {
@@ -720,15 +611,11 @@ int http_get(HTTP_INFO *hi, char *url, char *response, int size)
     }
     else
     {
-        sock_fd = hi->tls.ssl_fd.fd;
-
-        slen = sizeof(int);
-
-        if((getsockopt(sock_fd, SOL_SOCKET, SO_ERROR, (void *)&opt, &slen) < 0) || (opt > 0))
+        if(!hi->tls.io->connected(hi->tls.io))
         {
             https_close(hi);
 
-            https_init(hi, https, verify);
+            https_init(hi, https, verify, io);
 
             if((ret=https_connect(hi, host, port)) < 0)
             {
@@ -829,168 +716,13 @@ int http_get(HTTP_INFO *hi, char *url, char *response, int size)
 }
 
 /*---------------------------------------------------------------------*/
-int http_post(HTTP_INFO *hi, char *url, char *data, char *response, int size)
-{
-    char        request[1024], err[100];
-    char        host[256], port[10], dir[1024];
-    int         sock_fd, https, verify;
-    int         ret, opt, len;
-    socklen_t   slen;
-
-
-    if(NULL == hi) return -1;
-
-    verify = hi->tls.verify;
-
-    parse_url(url, &https, host, port, dir);
-
-    if( (hi->tls.ssl_fd.fd == -1) || (hi->url.https != https) ||
-        (strcmp(hi->url.host, host) != 0) || (strcmp(hi->url.port, port) != 0) )
-    {
-        if(hi->tls.ssl_fd.fd != -1)
-            https_close(hi);
-
-        https_init(hi, https, verify);
-
-        if((ret=https_connect(hi, host, port)) < 0)
-        {
-            https_close(hi);
-
-            mbedtls_strerror(ret, err, 100);
-            snprintf(response, 256, "socket error: %s(%d)", err, ret);
-
-            return -1;
-        }
-    }
-    else
-    {
-        sock_fd = hi->tls.ssl_fd.fd;
-
-        slen = sizeof(int);
-
-        if((getsockopt(sock_fd, SOL_SOCKET, SO_ERROR, (void *)&opt, &slen) < 0) || (opt > 0))
-        {
-            https_close(hi);
-
-            https_init(hi, https, verify);
-
-            if((ret=https_connect(hi, host, port)) < 0)
-            {
-                https_close(hi);
-
-                mbedtls_strerror(ret, err, 100);
-                snprintf(response, 256, "socket error: %s(%d)", err, ret);
-
-                return -1;
-            }
-        }
-//      else
-//          printf("socket reuse: %d \n", sock_fd);
-    }
-
-    /* Send HTTP request. */
-    len = snprintf(request, 1024,
-            "POST %s HTTP/1.1\r\n"
-            "User-Agent: Mozilla/4.0\r\n"
-            "Host: %s:%s\r\n"
-            "Connection: Keep-Alive\r\n"
-            "Accept: */*\r\n"
-            "Content-Type: application/json; charset=utf-8\r\n"
-            "Content-Length: %d\r\n"
-            "%s\r\n"
-            "%s",
-            dir, host, port,
-            (int)strlen(data),
-            hi->request.cookie,
-            data);
-
-    if((ret = https_write(hi, request, len)) != len)
-    {
-        https_close(hi);
-
-        mbedtls_strerror(ret, err, 100);
-
-        snprintf(response, 256, "socket error: %s(%d)", err, ret);
-
-        return -1;
-    }
-
-//  printf("request: %s \r\n\r\n", request);
-
-    hi->response.status = 0;
-    hi->response.content_length = 0;
-    hi->response.close = 0;
-
-    hi->r_len = 0;
-    hi->header_end = 0;
-
-    hi->body = response;
-    hi->body_size = size;
-    hi->body_len = 0;
-
-    hi->body[0] = 0;
-
-    while(1)
-    {
-        ret = https_read(hi, &hi->r_buf[hi->r_len], (int)(H_READ_SIZE - hi->r_len));
-        if(ret == MBEDTLS_ERR_SSL_WANT_READ) continue;
-        else if(ret < 0)
-        {
-            https_close(hi);
-
-            mbedtls_strerror(ret, err, 100);
-
-            snprintf(response, 256, "socket error: %s(%d)", err, ret);
-
-            return -1;
-        }
-        else if(ret == 0)
-        {
-            https_close(hi);
-            break;
-        }
-
-        hi->r_len += ret;
-        hi->r_buf[hi->r_len] = 0;
-
-//        printf("read(%ld): %s \n", hi->r_len, hi->r_buf);
-//        printf("read(%ld) \n", hi->r_len);
-
-        if(http_parse(hi) != 0) break;
-    }
-
-    if(hi->response.close == 1)
-    {
-        https_close(hi);
-    }
-    else
-    {
-        strncpy(hi->url.host, host, strlen(host));
-        strncpy(hi->url.port, port, strlen(port));
-        strncpy(hi->url.path, dir, strlen(dir));
-    }
-
-/*
-    printf("status: %d \n", hi->response.status);
-    printf("cookie: %s \n", hi->response.cookie);
-    printf("location: %s \n", hi->response.location);
-    printf("referrer: %s \n", hi->response.referrer);
-    printf("length: %d \n", hi->response.content_length);
-    printf("body: %d \n", hi->body_len);
-*/
-
-    return hi->response.status;
-
-}
-
-/*---------------------------------------------------------------------*/
 void http_strerror(char *buf, int len)
 {
     mbedtls_strerror(_error, buf, len);
 }
 
 /*---------------------------------------------------------------------*/
-int http_open(HTTP_INFO *hi, char *url)
+int http_open(HTTP_INFO *hi, char *url, netio_t *io)
 {
     char        host[256], port[10], dir[1024];
     int         sock_fd, https, verify;
@@ -1004,13 +736,13 @@ int http_open(HTTP_INFO *hi, char *url)
 
     parse_url(url, &https, host, port, dir);
 
-    if ((hi->tls.ssl_fd.fd == -1) || (hi->url.https != https) ||
+    if (!hi->tls.io->opened(hi->tls.io) || (hi->url.https != https) ||
         (strcmp(hi->url.host, host) != 0) || (strcmp(hi->url.port, port) != 0))
     {
-        if (hi->tls.ssl_fd.fd != -1)
+        if (hi->tls.io->opened(hi->tls.io))
             https_close(hi);
 
-        https_init(hi, https, verify);
+        https_init(hi, https, verify, io);
 
         if ((ret = https_connect(hi, host, port)) < 0)
         {
@@ -1023,15 +755,11 @@ int http_open(HTTP_INFO *hi, char *url)
     }
     else
     {
-        sock_fd = hi->tls.ssl_fd.fd;
-
-        slen = sizeof(int);
-
-        if ((getsockopt(sock_fd, SOL_SOCKET, SO_ERROR, (void *) &opt, &slen) < 0) || (opt > 0))
+        if (!hi->tls.io->connected(hi->tls.io))
         {
             https_close(hi);
 
-            https_init(hi, https, verify);
+            https_init(hi, https, verify, io);
 
             if ((ret = https_connect(hi, host, port)) < 0)
             {

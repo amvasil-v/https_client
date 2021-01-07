@@ -12,6 +12,8 @@
 #include "mbedtls/error.h"
 #include "mbedtls/certs.h"
 
+#include "netio.h"
+
 /*---------------------------------------------------------------------*/
 #define H_FIELD_SIZE     512
 #define H_READ_SIZE     2048
@@ -43,12 +45,14 @@ typedef struct
 {
     BOOL    verify;
 
-    mbedtls_net_context         ssl_fd;
+    //mbedtls_net_context         ssl_fd;
     mbedtls_entropy_context     entropy;
     mbedtls_ctr_drbg_context    ctr_drbg;
     mbedtls_ssl_context         ssl;
     mbedtls_ssl_config          conf;
     mbedtls_x509_crt            cacert;
+
+    netio_t                     *io;
 
 } HTTP_SSL;
 
@@ -85,13 +89,12 @@ typedef struct
 
 char *strtoken(char *src, char *dst, int size);
 
-int  http_init(HTTP_INFO *hi, BOOL verify);
+int  http_init(HTTP_INFO *hi, BOOL verify, netio_t *io);
 int  http_close(HTTP_INFO *hi);
-int  http_get(HTTP_INFO *hi, char *url, char *response, int size);
-int  http_post(HTTP_INFO *hi, char *url, char *data, char *response, int size);
+int  http_get(HTTP_INFO *hi, char *url, char *response, int size, netio_t *io);
 
 void http_strerror(char *buf, int len);
-int  http_open(HTTP_INFO *hi, char *url);
+int  http_open(HTTP_INFO *hi, char *url, netio_t *io);
 int  http_write_header(HTTP_INFO *hi);
 int  http_write(HTTP_INFO *hi, char *data, int len);
 int  http_write_end(HTTP_INFO *hi);
