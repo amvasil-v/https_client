@@ -25,6 +25,20 @@ int main(int argc, char *argv[])
     printf("return code: %d \n", ret);
     printf("return body: %s \n", response);
 
+    url = "https://xkcd.com/1/info.0.json";
+
+    ret = http_get(&hi, url, response, sizeof(response), io);
+
+    printf("return code: %d \n", ret);
+    printf("return body: %s \n", response);
+
+    url = "http://kspt.icc.spbstu.ru/";
+
+    ret = http_get(&hi, url, response, sizeof(response), io);
+
+    printf("return code: %d \n", ret);
+    printf("return body: %s \n", response);
+
     http_close(&hi);
 
     netio_netsocket_free(io);

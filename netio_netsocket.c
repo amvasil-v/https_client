@@ -43,13 +43,13 @@ static int mbedtls_net_connect_timeout( mbedtls_net_context *ctx, const char *ho
             continue;
         }
 
-        if( mbedtls_net_set_nonblock( ctx ) < 0 )
+        /*if( mbedtls_net_set_nonblock( ctx ) < 0 )
         {
             close( ctx->fd );
             ctx->fd = -1;
             ret = MBEDTLS_ERR_NET_CONNECT_FAILED;
             break;
-        }
+        }*/
 
         if( connect( ctx->fd, cur->ai_addr, cur->ai_addrlen ) == 0 )
         {
