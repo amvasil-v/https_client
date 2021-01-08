@@ -5,6 +5,7 @@
 #include "netio_netsocket.h"
 #include "esp_bridge.h"
 #include "netio_esp.h"
+#include "bridge_config.h"
 
 int main(int argc, char *argv[])
 {
@@ -16,7 +17,7 @@ int main(int argc, char *argv[])
 
     esp_bridge_t *br = esp_bridge_create();
     while(1) {
-        if (esp_bridge_connect(br, "172.24.0.1", 5555)) {
+        if (esp_bridge_connect(br, ESP_BRIDGE_ADDRESS, ESP_BRIDGE_PORT)) {
             printf("Failed to connect to ESP\n");
             break;
         }
@@ -37,7 +38,7 @@ int main(int argc, char *argv[])
     esp_bridge_free(br);
 
     netio_t *esp_io = netio_esp_create();
-    if (netio_esp_establish_bridge(esp_io, "172.24.0.1", 5555)) {
+    if (netio_esp_establish_bridge(esp_io, ESP_BRIDGE_ADDRESS, ESP_BRIDGE_PORT)) {
         printf("Failed to establish bridge\n");
     }
     else {
