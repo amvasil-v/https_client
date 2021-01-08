@@ -7,7 +7,9 @@ set(SOURCE_FILES
     main.c
     https.c
     https.h
-    netio_netsocket.c)
+    netio_netsocket.c
+    esp_bridge.c
+    netio_esp.c)
 
 include_directories(.)
 include_directories(include)
