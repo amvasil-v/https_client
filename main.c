@@ -15,7 +15,7 @@ int main(int argc, char *argv[])
 
     HTTP_INFO hi;
 
-    netio_t *esp_io = netio_esp_create();
+    /*netio_t *esp_io = netio_esp_create();
     if (netio_esp_establish_bridge(esp_io, ESP_BRIDGE_ADDRESS, ESP_BRIDGE_PORT)) {
         printf("Failed to establish bridge\n");
     }
@@ -41,18 +41,26 @@ int main(int argc, char *argv[])
     printf("Received HTTP:\n");
     char buf[2048];
     while(1) {
+        memset(buf, 0, 2048);
+        printf("HTTP resp read:\n");
         if (esp_io->recv_timeout(esp_io, buf, 400, 5000) < 0)
             break;
-        printf("%s\n", buf);
-        break;
+        printf("HTTP:\n%s\n", buf);
     }
     printf("Done\n");
 
-    netio_esp_free(esp_io);
+    netio_esp_free(esp_io);*/
 
-    /*// Init http session. verify: check the server CA cert.
-    netio_t *io = netio_netsocket_create();
-    http_init(&hi, TRUE, io);*/
+    // Init http session. verify: check the server CA cert.
+    //netio_t *io = netio_netsocket_create();
+    netio_t *io = netio_esp_create();
+    if (netio_esp_establish_bridge(io, ESP_BRIDGE_ADDRESS, ESP_BRIDGE_PORT)) {
+        printf("Failed to establish bridge\n");
+    }
+    else {
+        printf("Connected to remote ESP\n");
+    }
+    http_init(&hi, TRUE, io);
 
     // Test https get method.
 
@@ -68,17 +76,20 @@ int main(int argc, char *argv[])
     ret = http_get(&hi, url, response, sizeof(response), io);
 
     printf("return code: %d \n", ret);
-    printf("return body: %s \n", response);
+    printf("return body: %s \n", response);*/
 
-    url = "http://kspt.icc.spbstu.ru/";
+    //url = "http://kspt.icc.spbstu.ru/";
+
+    url = "http://httpbin.org/ip";
 
     ret = http_get(&hi, url, response, sizeof(response), io);
 
     printf("return code: %d \n", ret);
-    printf("return body: %s \n", response);*/
+    printf("return body:\n%s\n", response);
 
-    /*http_close(&hi);
-    netio_netsocket_free(io);*/
+    http_close(&hi);
+    //netio_netsocket_free(io);
+    netio_esp_free(io);
 
     return 0;
 }

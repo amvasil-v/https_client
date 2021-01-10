@@ -27,7 +27,9 @@ static uint8_t netio_esp_connected(void *ctx)
 {
     netio_t *io = (netio_t *)ctx;
     esp_bridge_t *br = (esp_bridge_t *)io->ctx;
-    return esp_bridge_connected(br);
+    uint8_t connected = esp_bridge_connected(br);
+    printf("ESP %s\n",connected?"connected":"disconnected");
+    return connected;
 } 
 
 netio_t *netio_esp_create(void)

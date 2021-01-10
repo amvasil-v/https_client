@@ -111,8 +111,9 @@ int esp_bridge_read_timeout(esp_bridge_t * br, const char *buf, size_t len, uint
     ret = select( fd + 1, &read_fds, NULL, NULL, timeout == 0 ? NULL : &tv );
 
     /* Zero fds ready means we timed out */
-    if( ret == 0 )
+    if( ret == 0 ) {
         return -1;
+    }
 
     return read(fd, buf, len);
 }
