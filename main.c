@@ -15,28 +15,6 @@ int main(int argc, char *argv[])
 
     HTTP_INFO hi;
 
-    esp_bridge_t *br = esp_bridge_create();
-    while(1) {
-        if (esp_bridge_connect(br, ESP_BRIDGE_ADDRESS, ESP_BRIDGE_PORT)) {
-            printf("Failed to connect to ESP\n");
-            break;
-        }
-        const char *esp_cmd = "AT\r\n";
-        char resp[256] = {0};
-        size_t write_len = strlen(esp_cmd);
-        if (esp_bridge_write(br, esp_cmd, write_len) != write_len) {
-            printf("Failed to send command\n");
-            break;
-        }
-        if (esp_bridge_read_timeout(br, resp, 256, 1000) < 0) {
-            printf("Failed to receive resp\n");
-            break;
-        }
-        printf("ESP:\r\n%s\r\n", resp);
-        break;
-    };
-    esp_bridge_free(br);
-
     netio_t *esp_io = netio_esp_create();
     if (netio_esp_establish_bridge(esp_io, ESP_BRIDGE_ADDRESS, ESP_BRIDGE_PORT)) {
         printf("Failed to establish bridge\n");
@@ -44,6 +22,31 @@ int main(int argc, char *argv[])
     else {
         printf("Connected to remote ESP\n");
     }
+
+    if (esp_io->connect(esp_io, "httpbin.org", "80")) {
+        printf("Failed to connect to TCP server\n");
+    }
+    else {
+        printf("Connected to TCP server\n");
+    }
+
+    const char *request = "GET /ip HTTP/1.1\r\nHost:httpbin.org\r\n";
+    if (esp_io->send(esp_io, request, strlen(request))) {
+        printf("Failed to send request\n");
+    }
+    else {
+        printf("HTTP request sent\n");
+    }
+
+    printf("Received HTTP:\n");
+    char buf[2048];
+    while(1) {
+        if (esp_io->recv_timeout(esp_io, buf, 2048, 5000))
+            break;
+        printf("%s", buf);
+    }
+    printf("\nDone\n");
+
     netio_esp_free(esp_io);
 
     /*// Init http session. verify: check the server CA cert.

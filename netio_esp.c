@@ -4,26 +4,23 @@
 
 static int netio_esp_send(void *ctx, const unsigned char *buf, size_t len)
 {
-    netio_t *io = (netio_t *)ctx;
-    esp_bridge_t *br = (esp_bridge_t *)io->ctx;
+    netio_esp_t *io = (netio_esp_t *)ctx;
     printf("Send %d bytes\n", len);
-    return esp_bridge_write(br, buf, len);
+    return esp_modem_tcp_send(&io->esp, buf, len);
 }
 
 static int netio_esp_recv_timeout(void *ctx, unsigned char *buf, size_t len, uint32_t timeout)
 {
-    netio_t *io = (netio_t *)ctx;
-    esp_bridge_t *br = (esp_bridge_t *)io->ctx;
-    int res = esp_bridge_read_timeout(br, buf, len, timeout);
+    netio_esp_t *io = (netio_esp_t *)ctx;
+    int res = esp_modem_tcp_receive(&io->esp, buf, len, timeout);
     printf("Recv %d bytes, res %d\n", len, res);
     return res;
 }
 
 static int netio_esp_connect(void *ctx, const char *host, const char *port)
 {
-    netio_t *io = (netio_t *)ctx;
-    esp_bridge_t *br = (esp_bridge_t *)io->ctx;
-    return -1; //TODO
+    netio_esp_t *io = (netio_esp_t *)ctx;
+    return esp_modem_tcp_connect(&io->esp, host, port, 2000);
 }
 
 static uint8_t netio_esp_connected(void *ctx)
@@ -45,7 +42,8 @@ netio_t *netio_esp_create(void)
     io->opened = netio_esp_connected;
     io->connected = netio_esp_connected;
     io->ctx = &ns_io->br;    
-    mbedtls_net_init((esp_bridge_t *)io->ctx);
+    esp_bridge_init((esp_bridge_t *)io->ctx);
+    esp_modem_init(&ns_io->esp, &ns_io->br);
     return io;
 }
 

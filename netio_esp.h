@@ -3,11 +3,13 @@
 
 #include "netio.h"
 #include "esp_bridge.h"
+#include "esp_modem.h"
 
 struct _netio_esp_t
 {
     netio_t io;
     esp_bridge_t br;
+    esp_modem_t esp;
 };
 
 typedef struct _netio_esp_t netio_esp_t;
