@@ -5,9 +5,11 @@
 
 struct _esp_modem_t {
     esp_bridge_t *br;
-    const char *tx_buf;
-    const char *rx_buf;
-    const char *rx_append_ptr;
+    char *tx_buf;
+    char *rx_buf;
+    char *rx_wptr;
+    char *rx_data_buf;
+    char *rx_data_wptr;
 };
 typedef struct _esp_modem_t esp_modem_t;
 

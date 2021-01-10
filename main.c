@@ -41,11 +41,12 @@ int main(int argc, char *argv[])
     printf("Received HTTP:\n");
     char buf[2048];
     while(1) {
-        if (esp_io->recv_timeout(esp_io, buf, 2048, 5000))
+        if (esp_io->recv_timeout(esp_io, buf, 20, 5000) < 0)
             break;
-        printf("%s", buf);
+        printf("%s\n", buf);
+        break;
     }
-    printf("\nDone\n");
+    printf("Done\n");
 
     netio_esp_free(esp_io);
 

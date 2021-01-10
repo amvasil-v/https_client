@@ -4,6 +4,14 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#define ESP_MODEM_RX_BUF_SIZE 256
+#define ESP_MODEM_RX_DATA_BUF_SIZE 2048
+
+#define MAX(X,Y) ((X)>(Y)?(X):(Y))
+#define MIN(X,Y) ((X)<(Y)?(X):(Y))
+
+static const char *esp_modem_ipd_str = "\r\n+IPD,";
+
 static void string_list_append(esp_string_list_t **head, esp_string_list_t **tail, const char *str, size_t len)
 {
     esp_string_list_t *res;
@@ -72,14 +80,16 @@ int esp_append_check_complete(char *buf, char **append, size_t len, const char *
 void esp_modem_init(esp_modem_t *esp, esp_bridge_t *bridge)
 {
     esp->br = bridge;
-    esp->rx_buf = (const char *)malloc(2048);
-    esp->tx_buf = (const char *)malloc(2800);
+    esp->rx_buf = (char *)malloc(2048);
+    esp->tx_buf = (char *)malloc(ESP_MODEM_RX_BUF_SIZE);
+    esp->rx_data_buf = (char *)malloc(ESP_MODEM_RX_DATA_BUF_SIZE);
 }
 
 void esp_modem_release(esp_modem_t *esp)
 {
     free(esp->rx_buf);
     free(esp->tx_buf);
+    free(esp->rx_data_buf);
 }
 
 int esp_modem_tcp_connect(esp_modem_t *esp, const char *host, const char *port, uint32_t timeout)
@@ -89,7 +99,7 @@ int esp_modem_tcp_connect(esp_modem_t *esp, const char *host, const char *port, 
     int res;
     if (!esp_bridge_connected(esp->br))
         return -1;
-    esp->rx_append_ptr = esp->rx_buf;
+    esp->rx_wptr = esp->rx_buf;
 
     sprintf(esp->tx_buf, "AT+CIPSTART=\"TCP\",\"%s\",%s\r\n", host, port);
     res = esp_bridge_write(esp->br, esp->tx_buf, strlen(esp->tx_buf));
@@ -110,29 +120,45 @@ int esp_modem_tcp_connect(esp_modem_t *esp, const char *host, const char *port, 
             printf("Received invalid response: %s\n", esp->rx_buf);
             return -1;
         }
-        if (ptr > esp->rx_buf + 2800)
+        if (ptr > esp->rx_buf + ESP_MODEM_RX_BUF_SIZE)
             return -1;
     }
     printf("Connection timeout\n");
     return -1;
 }
 
+static int esp_modem_terminate_rx_buf(esp_modem_t *esp)
+{
+    if ((ptrdiff_t)(esp->rx_wptr - esp->rx_buf) >= ESP_MODEM_RX_BUF_SIZE)
+    {
+        esp->rx_wptr = 0;
+        printf("TCP rx buffer overflow\n");
+        return -1;
+    }
+    *esp->rx_wptr = '\0';
+    return 0;
+}
+
 static int esp_confirm_tcp_send(esp_modem_t *esp)
 {
     int res;
     int i;
-    char *wptr = esp->rx_buf;
     char *confirm;
     static const char *confirm_str = "\r\nSEND OK\r\n";
+
+    // reset append read pointers
+    esp->rx_wptr = esp->rx_buf;
+    esp->rx_data_wptr = esp->rx_data_buf;
+
     for (i = 0; i < 10; i++) {
-        res = esp_bridge_read_timeout(esp->br, wptr, 43, 100);
+        res = esp_bridge_read_timeout(esp->br, esp->rx_wptr, 43, 100);
         if (res <= 0)
             continue;
-        wptr += res;
+        esp->rx_wptr += res;
+        esp_modem_terminate_rx_buf(esp);
         confirm = strstr(esp->rx_buf, confirm_str);
         if (confirm) {
             printf("TX confirmed\n");
-            esp->rx_append_ptr = confirm + strlen(confirm_str);
             return 0;
         }
     }
@@ -146,8 +172,7 @@ int esp_modem_tcp_send(esp_modem_t *esp, const char *buf, size_t len)
     int i;
     static const char *newline = "\r\n";
     if (!esp_bridge_connected(esp->br))
-        return -1;
-    esp->rx_append_ptr = esp->rx_buf;
+        return -1;    
     int cipsend_len = len + strlen(newline);
     sprintf(esp->tx_buf, "AT+CIPSEND=%d\r\n", cipsend_len);
     res = esp_bridge_write(esp->br, esp->tx_buf, strlen(esp->tx_buf));
@@ -176,6 +201,106 @@ int esp_modem_tcp_send(esp_modem_t *esp, const char *buf, size_t len)
     return -1;
 }
 
+#define ESP_MODEM_IPD_MAX_LEN       4
+#define ESP_MODEM_IPD_MAX_VALUE     1400
+#define ESP_MODEM_READ_CHUNK_SIZE   128
+
+char *esp_modem_get_ipd(const char *str, uint32_t *out_length)
+{
+    int i;
+    char buf[ESP_MODEM_IPD_MAX_LEN + 1] = {0};
+    int out;
+
+    for (i = 1; i <= 4; i++) {
+        if (str[i] == ':') {
+            strncpy(buf, str, i);
+            out = atoi(buf);
+            if (out <= 0 || out >= ESP_MODEM_IPD_MAX_VALUE)
+                return -1;
+            *out_length = out;
+            return &str[i+1];
+        }
+    }
+
+    return NULL;
+}
+
+static void copy_bytes(char *dst, char *from, char *to)
+{
+    while (from != to) {
+        *dst++ = *from++;
+    }
+}
+
+static int esp_modem_receive_data(esp_modem_t *esp, char *out_buf, size_t req_len,
+                                  char *data_ptr, size_t ipd_len, uint32_t timeout)
+{
+    int ret = -1;
+    size_t rx_data_len = esp->rx_data_wptr - esp->rx_data_buf;
+    char *out_ptr = out_buf;
+    size_t written_len = 0;
+    size_t rx_data_read_len = MIN(rx_data_len, req_len);
+    size_t ipd_copy_len;
+
+    if (rx_data_read_len) {
+        // all required data was already in the data buffer
+        memcpy(out_ptr, esp->rx_data_buf, rx_data_read_len);
+        out_ptr += rx_data_read_len;
+        // copy remaining bytes to the start of the data buffer
+        copy_bytes(esp->rx_data_buf, esp->rx_data_buf + rx_data_read_len, esp->rx_data_wptr);
+        esp->rx_data_wptr -= rx_data_read_len;
+        written_len += rx_data_read_len;
+    }
+
+    ipd_copy_len = MIN(req_len - written_len, ipd_len);
+    if (ipd_copy_len) {
+        memcpy(out_ptr, data_ptr, ipd_copy_len);
+        out_ptr += ipd_copy_len;
+        written_len += ipd_copy_len;
+    }
+
+
+    return ret;
+}
+
+int esp_modem_tcp_receive(esp_modem_t *esp, char *buf, size_t len, uint32_t timeout)
+{
+    int res;
+    uint32_t tim = 0;
+    const uint32_t read_timeout = timeout > 100 ? 100 : timeout;    
+    char *ptr;
+    char *data_ptr;
+    uint32_t ipd_len = 0;
+
+    if (len == 0)
+        return 0;   
+
+    while (tim < timeout) {
+        res = esp_bridge_read_timeout(esp->br, esp->rx_wptr, ESP_MODEM_READ_CHUNK_SIZE, read_timeout);
+        if (res <= 0) {
+            tim += read_timeout;
+            continue;
+        }
+        esp->rx_wptr += res;
+        esp_modem_terminate_rx_buf(esp);
+        ptr = strstr(esp->rx_buf, esp_modem_ipd_str);
+        if (!ptr) {
+            continue;
+        }
+        data_ptr = esp_modem_get_ipd(ptr + strlen(esp_modem_ipd_str), &ipd_len);
+        if (!data_ptr) {
+            printf("Failed to parse IPD\n");
+            return -1;
+        }
+        printf("Found IPD: %d\n", ipd_len);
+        return esp_modem_receive_data(esp, buf, len, data_ptr, ipd_len, timeout - tim);
+    };
+
+    printf("TCP read timeout\n");
+    return -1;
+}
+
+#if 0
 int esp_modem_tcp_receive(esp_modem_t *esp, char *buf, size_t len, uint32_t timeout)
 {
     int res;
@@ -188,12 +313,12 @@ int esp_modem_tcp_receive(esp_modem_t *esp, char *buf, size_t len, uint32_t time
 
     for (tim = 0; tim < timeout; tim += read_timeout)
     {
-        res = esp_bridge_read_timeout(esp->br, esp->rx_append_ptr, len, read_timeout);
+        res = esp_bridge_read_timeout(esp->br, esp->rx_wptr, len, read_timeout);
 
         ptr = strstr(esp->rx_buf, str_ipd);
-        if (!ptr || ptr > esp->rx_append_ptr + res) {
+        if (!ptr || ptr > esp->rx_wptr + res) {
             if (res > 0)
-                 esp->rx_append_ptr += res;
+                 esp->rx_wptr += res;
             continue;
         }
         const char *len_start = ptr + strlen(str_ipd);
@@ -221,20 +346,21 @@ int esp_modem_tcp_receive(esp_modem_t *esp, char *buf, size_t len, uint32_t time
             return -1;
         }
         const char *data_start = len_start + ipd_field_len + 1;
-        int curr_size = esp->rx_append_ptr + res - data_start;
+        int curr_size = esp->rx_wptr + res - data_start;
         if (curr_size < ipd_len) {
             printf("read %d bytes, need to read more\n", curr_size);
             if (res > 0)
-                 esp->rx_append_ptr += res;
+                 esp->rx_wptr += res;
             continue;
         }
         memcpy(buf, data_start, ipd_len);
         // copy remaining bytes to the start of the RX buffer
         int copy_size = curr_size - ipd_len;
         memcpy(esp->rx_buf, data_start + ipd_len, copy_size);
-        esp->rx_append_ptr = esp->rx_buf + copy_size;
+        esp->rx_wptr = esp->rx_buf + copy_size;
         return ipd_len;        
     }
     printf("TCP read timeout\n");
     return -1;
 }
+#endif
