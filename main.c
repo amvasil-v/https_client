@@ -41,7 +41,7 @@ int main(int argc, char *argv[])
     printf("Received HTTP:\n");
     char buf[2048];
     while(1) {
-        if (esp_io->recv_timeout(esp_io, buf, 20, 5000) < 0)
+        if (esp_io->recv_timeout(esp_io, buf, 400, 5000) < 0)
             break;
         printf("%s\n", buf);
         break;

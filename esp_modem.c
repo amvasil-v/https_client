@@ -237,10 +237,13 @@ static int esp_modem_receive_data(esp_modem_t *esp, char *out_buf, size_t req_le
 {
     int ret = -1;
     size_t rx_data_len = esp->rx_data_wptr - esp->rx_data_buf;
+    size_t curr_len = esp->rx_wptr - data_ptr;
     char *out_ptr = out_buf;
     size_t written_len = 0;
     size_t rx_data_read_len = MIN(rx_data_len, req_len);
     size_t ipd_copy_len;
+    uint32_t tim = 0;
+    const uint32_t read_timeout = timeout > 100 ? 100 : timeout;
 
     if (rx_data_read_len) {
         // all required data was already in the data buffer
@@ -252,14 +255,31 @@ static int esp_modem_receive_data(esp_modem_t *esp, char *out_buf, size_t req_le
         written_len += rx_data_read_len;
     }
 
-    ipd_copy_len = MIN(req_len - written_len, ipd_len);
+    ipd_copy_len = MIN(req_len - written_len, curr_len);
     if (ipd_copy_len) {
         memcpy(out_ptr, data_ptr, ipd_copy_len);
         out_ptr += ipd_copy_len;
         written_len += ipd_copy_len;
     }
 
+    if (ipd_copy_len < curr_len) {
+        uint32_t rem_ipd = ipd_len - ipd_copy_len;
+        memcpy(esp->rx_data_wptr, data_ptr + ipd_copy_len, rem_ipd);
+        esp->rx_data_wptr += rem_ipd;
+    }
 
+    if (written_len == req_len)
+        return req_len;
+    
+    while (tim < timeout && written_len < ipd_len) {
+        int res = esp_bridge_read_timeout(esp->br, esp->rx_data_wptr, req_len - written_len, read_timeout);
+        if (res <= 0) {
+            tim += read_timeout;
+            continue;
+        }
+    };
+
+    printf("TCP read timeout\n");
     return ret;
 }
 
@@ -267,7 +287,7 @@ int esp_modem_tcp_receive(esp_modem_t *esp, char *buf, size_t len, uint32_t time
 {
     int res;
     uint32_t tim = 0;
-    const uint32_t read_timeout = timeout > 100 ? 100 : timeout;    
+    const uint32_t read_timeout = timeout > 100 ? 100 : timeout;
     char *ptr;
     char *data_ptr;
     uint32_t ipd_len = 0;
@@ -276,7 +296,7 @@ int esp_modem_tcp_receive(esp_modem_t *esp, char *buf, size_t len, uint32_t time
         return 0;   
 
     while (tim < timeout) {
-        res = esp_bridge_read_timeout(esp->br, esp->rx_wptr, ESP_MODEM_READ_CHUNK_SIZE, read_timeout);
+        res = esp_bridge_read_timeout(esp->br, esp->rx_wptr, strlen(esp_modem_ipd_str + 5), read_timeout);
         if (res <= 0) {
             tim += read_timeout;
             continue;
@@ -293,6 +313,7 @@ int esp_modem_tcp_receive(esp_modem_t *esp, char *buf, size_t len, uint32_t time
             return -1;
         }
         printf("Found IPD: %d\n", ipd_len);
+        esp->rx_wptr = esp->rx_data_buf;
         return esp_modem_receive_data(esp, buf, len, data_ptr, ipd_len, timeout - tim);
     };
 

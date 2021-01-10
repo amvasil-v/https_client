@@ -10,6 +10,7 @@ struct _esp_modem_t {
     char *rx_wptr;
     char *rx_data_buf;
     char *rx_data_wptr;
+    size_t ipd_len;
 };
 typedef struct _esp_modem_t esp_modem_t;
 
