@@ -1,11 +1,12 @@
 #include "netio_esp.h"
 
 #include <stdlib.h>
+#include <stdio.h>
 
 static int netio_esp_send(void *ctx, const unsigned char *buf, size_t len)
 {
     netio_esp_t *io = (netio_esp_t *)ctx;
-    printf("Send %d bytes\n", len);
+    printf("Send %lu bytes\n", len);
     return esp_modem_tcp_send(&io->esp, buf, len);
 }
 
@@ -13,7 +14,7 @@ static int netio_esp_recv_timeout(void *ctx, unsigned char *buf, size_t len, uin
 {
     netio_esp_t *io = (netio_esp_t *)ctx;
     int res = esp_modem_tcp_receive(&io->esp, buf, len, timeout);
-    printf("Recv %d bytes, res %d\n", len, res);
+    printf("Recv %lu bytes, res %d\n", len, res);
     return res;
 }
 

@@ -31,11 +31,11 @@ if (CMAKE_VERSION VERSION_LESS 2.8.11)
 endif()
 
 set(TEST_SOURCES
-    test_esp_modem.cpp
+    test_esp_utils.cpp
 )
 
 set(SOURCE_FILES
-    ${CMAKE_SOURCE_DIR}/esp_modem.c
+    ${CMAKE_SOURCE_DIR}/esp_utils.c
 )
 
 # Now simply link against gtest or gtest_main as needed. Eg

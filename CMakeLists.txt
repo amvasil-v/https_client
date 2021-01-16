@@ -10,7 +10,8 @@ set(SOURCE_FILES
     netio_netsocket.c
     esp_bridge.c
     netio_esp.c
-    esp_modem.c)
+    esp_modem.c
+    esp_utils.c)
 
 include_directories(.)
 include_directories(include)
@@ -25,4 +26,4 @@ target_link_libraries(https_client mbedtls)
 target_link_libraries(https_client mbedcrypto)
 target_link_libraries(https_client pthread)
 
-#add_subdirectory(tests)
+add_subdirectory(tests)
