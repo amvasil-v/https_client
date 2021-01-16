@@ -118,14 +118,13 @@ int esp_modem_tcp_send(esp_modem_t *esp, const char *buf, size_t len)
     int i;
     static const char *newline = "\r\n";
     if (!esp_bridge_connected(esp->br))
-        return -1;    
-    int cipsend_len = len + strlen(newline);
-    sprintf(esp->tx_buf, "AT+CIPSEND=%d\r\n", cipsend_len);
+        return -1;
+    sprintf(esp->tx_buf, "AT+CIPSEND=%d\r\n", len);
     esp_reset_rx(esp);
     res = esp_bridge_write(esp->br, esp->tx_buf, strlen(esp->tx_buf));
     if (res < 0)
         return -1;
-    printf("Sent cipsend %d\n", cipsend_len);
+    printf("Sent cipsend %d\n", len);
 
     char *ptr = esp->rx_buf;
     for (i = 0; i < 10; i++) {
@@ -136,9 +135,6 @@ int esp_modem_tcp_send(esp_modem_t *esp, const char *buf, size_t len)
         if (esp_receive_buf_ready_tx(esp->rx_buf, ptr - esp->rx_buf)) {
             printf("Ready to TX TCP\n");
             res = esp_bridge_write(esp->br, buf, len);
-            if (res < 0)
-                return -1;
-            res = esp_bridge_write(esp->br, newline, strlen(newline));
             if (res < 0)
                 return -1;
             if (!esp_confirm_tcp_send(esp))
