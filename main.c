@@ -49,6 +49,7 @@ int main(int argc, char *argv[])
     printf("return body:\n%s\n", response);
 
     http_close(&hi);
+    io->disconnect(io);
 #endif
 
 #ifdef RAW_ESP_REQUEST

@@ -55,7 +55,7 @@ int esp_modem_tcp_connect(esp_modem_t *esp, const char *host, const char *port, 
     size_t rx_len = 0;
     static const char *connect_str = "CONNECT\r\n";
     static const char *acon_str = "ALREADY CONNECTED\r\n";
-    if (!esp_bridge_connected(esp->br))
+    if (!esp || !esp_bridge_connected(esp->br))
         return -1;
     esp_reset_rx(esp);
 
@@ -73,7 +73,7 @@ int esp_modem_tcp_connect(esp_modem_t *esp, const char *host, const char *port, 
         if (esp_receive_buf_complete(esp->rx_buf, rx_len)) {
             if (esp_find_substr(esp->rx_buf, rx_len, connect_str, strlen(connect_str)) ||
                 esp_find_substr(esp->rx_buf, rx_len, acon_str, strlen(acon_str))) {
-                    printf("TCP: connected to %s:%s\n", host, port);
+                    printf("[ESP] TCP: connected to %s:%s\n", host, port);
                     return 0;
                 }
             printf("Received invalid response: %s\n", esp->rx_buf);
@@ -104,7 +104,7 @@ static int esp_confirm_tcp_send(esp_modem_t *esp)
         rx_len += res;
         confirm = esp_find_substr(esp->rx_buf, rx_len, confirm_str, strlen(confirm_str));
         if (confirm) {
-            printf("TX confirmed\n");
+            printf("[ESP] TX confirmed\n");
             return 0;
         }
     }
@@ -116,15 +116,13 @@ int esp_modem_tcp_send(esp_modem_t *esp, const char *buf, size_t len)
 {
     int res;
     int i;
-    static const char *newline = "\r\n";
-    if (!esp_bridge_connected(esp->br))
+    if (!esp || !esp_bridge_connected(esp->br))
         return -1;
     sprintf(esp->tx_buf, "AT+CIPSEND=%d\r\n", len);
     esp_reset_rx(esp);
     res = esp_bridge_write(esp->br, esp->tx_buf, strlen(esp->tx_buf));
     if (res < 0)
         return -1;
-    printf("Sent cipsend %d\n", len);
 
     char *ptr = esp->rx_buf;
     for (i = 0; i < 10; i++) {
@@ -133,7 +131,6 @@ int esp_modem_tcp_send(esp_modem_t *esp, const char *buf, size_t len)
             continue;
         ptr += res;
         if (esp_receive_buf_ready_tx(esp->rx_buf, ptr - esp->rx_buf)) {
-            printf("Ready to TX TCP\n");
             res = esp_bridge_write(esp->br, buf, len);
             if (res < 0)
                 return -1;
@@ -201,19 +198,14 @@ static int esp_modem_receive_data(esp_modem_t *esp, char *out_buf, size_t req_le
         return -1;
     }
     esp->ipd_len -= read_bytes;
-
-    printf("Read %d bytes from buffer\n", read_bytes);
-
     if (esp->ipd_len == 0) {
         esp_reset_rx(esp);
-        printf("Read whole IPD (1)\n");
         return read_bytes;
     }
     if (read_bytes == req_len)
         return read_bytes;
 
     size_t rem_len = MIN(req_len - read_bytes, esp->ipd_len);
-    printf("Reading %lu bytes from ESP\n", rem_len);
     int res = esp_bridge_read_timeout(esp->br, esp->rx_wptr, rem_len, timeout);
     if (res <= 0)
     {
@@ -231,7 +223,6 @@ static int esp_modem_receive_data(esp_modem_t *esp, char *out_buf, size_t req_le
     }
     esp->ipd_len -= res;
     if (esp->ipd_len == 0) {
-        printf("Read whole IPD (2)\n");
         esp_reset_rx(esp);
     }   
 
@@ -263,7 +254,7 @@ static int esp_modem_receive_ipd(esp_modem_t *esp, uint32_t timeout)
             printf("Failed to parse IPD\n");
             return -1;
         }
-        printf("Found IPD: %d\n", ipd_len);
+        printf("[ESP] Received IPD %d\n", ipd_len);
         esp->rx_rptr = data_ptr;       
         esp->ipd_len = ipd_len;
         return 0;
@@ -279,6 +270,8 @@ int esp_modem_tcp_receive(esp_modem_t *esp, char *buf, size_t len, uint32_t time
 
     if (len == 0)
         return 0;
+    if (!esp || !esp_bridge_connected(esp->br))
+        return -1;
 
     if (!esp->ipd_len)
     {
@@ -293,5 +286,17 @@ int esp_modem_tcp_receive(esp_modem_t *esp, char *buf, size_t len, uint32_t time
 
     printf("TCP read timeout\n");
     return -1;
+}
+
+int esp_modem_tcp_close(esp_modem_t *esp)
+{
+    static const char *cipclose_str = "AT+CIPCLOSE\r\n";
+    if (!esp || !esp_bridge_connected(esp->br))
+        return -1;
+    int res = esp_bridge_write(esp->br, cipclose_str, strlen(cipclose_str));
+    if (res < 0)
+        return -1;
+    printf("[ESP] Sent CIPCLOSE\n");
+    return 0;
 }
 

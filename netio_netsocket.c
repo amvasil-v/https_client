@@ -162,6 +162,11 @@ static uint8_t netio_netsocket_connected(void *ctx)
     return 1;
 }
 
+int netio_netsocket_disconnect(void *ctx)
+{
+    return 0;
+}
+
 netio_t *netio_netsocket_create(void)
 {
     netio_netsocket_t *ns_io = (netio_netsocket_t *)malloc(sizeof(netio_netsocket_t));
@@ -173,6 +178,7 @@ netio_t *netio_netsocket_create(void)
     io->connect = netio_netsocket_connect;
     io->opened = netio_netsocket_opened;
     io->connected = netio_netsocket_connected;
+    io->disconnect = netio_netsocket_disconnect;
     io->ctx = &ns_io->net_ctx;    
     mbedtls_net_init((mbedtls_net_context *)io->ctx);
     return io;

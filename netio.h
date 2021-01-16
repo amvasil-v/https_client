@@ -11,6 +11,7 @@ struct _netio_t {
     int (*connect)(void *ctx, const char *host, const char *port);
     uint8_t (*opened)(void *ctx);
     uint8_t (*connected)(void *ctx);
+    int (*disconnect)(void *ctx);
 };
 
 typedef struct _netio_t netio_t;

@@ -6,16 +6,15 @@
 static int netio_esp_send(void *ctx, const unsigned char *buf, size_t len)
 {
     netio_esp_t *io = (netio_esp_t *)ctx;
-    printf("Send %lu bytes\n", len);
+    printf("[ESP] Send %lu bytes\n", len);
     return esp_modem_tcp_send(&io->esp, buf, len);
 }
 
 static int netio_esp_recv_timeout(void *ctx, unsigned char *buf, size_t len, uint32_t timeout)
 {
     netio_esp_t *io = (netio_esp_t *)ctx;
-    printf("[ESP] >> receive %d bytes\n", len);
     int res = esp_modem_tcp_receive(&io->esp, buf, len, timeout);
-    printf("[ESP] << received res %d\n", res);
+    printf("[ESP] Received %d\n", res);
     return res;
 }
 
@@ -25,12 +24,17 @@ static int netio_esp_connect(void *ctx, const char *host, const char *port)
     return esp_modem_tcp_connect(&io->esp, host, port, 2000);
 }
 
+static int netio_esp_disconnect(void *ctx)
+{
+    netio_esp_t *io = (netio_esp_t *)ctx;
+    return esp_modem_tcp_close(&io->esp);
+}
+
 static uint8_t netio_esp_connected(void *ctx)
 {
     netio_t *io = (netio_t *)ctx;
     esp_bridge_t *br = (esp_bridge_t *)io->ctx;
     uint8_t connected = esp_bridge_connected(br);
-    printf("ESP %s\n",connected?"connected":"disconnected");
     return connected;
 } 
 
@@ -45,6 +49,7 @@ netio_t *netio_esp_create(void)
     io->connect = netio_esp_connect;
     io->opened = netio_esp_connected;
     io->connected = netio_esp_connected;
+    io->disconnect = netio_esp_disconnect;
     io->ctx = &ns_io->br;    
     esp_bridge_init((esp_bridge_t *)io->ctx);
     esp_modem_init(&ns_io->esp, &ns_io->br);
