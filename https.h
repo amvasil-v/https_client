@@ -81,7 +81,10 @@ typedef struct
     long        body_size;
     long        body_len;
 
-
+    BOOL        ranged;
+    size_t      range_start;
+    size_t      range_end;
+    size_t      content_length;
 } HTTP_INFO;
 
 
@@ -99,6 +102,10 @@ int  http_write_header(HTTP_INFO *hi);
 int  http_write(HTTP_INFO *hi, char *data, int len);
 int  http_write_end(HTTP_INFO *hi);
 int  http_read_chunked(HTTP_INFO *hi, char *response, int size);
+
+int http_get_ranged(HTTP_INFO *hi, char *url, char *response, 
+                    size_t range_start, size_t range_end, size_t *content_len,
+                    netio_t *io);
 
 #endif //HTTPS_CLIENT_HTTPS_H
 

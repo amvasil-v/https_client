@@ -170,6 +170,27 @@ static int http_header(HTTP_INFO *hi, char *param)
             hi->response.close = TRUE;
         }
     }
+    else if(strncasecmp(t1, "content-range:", 14) == 0)
+    {
+        if(strncasecmp(t2, "bytes", 5) == 0)
+        {
+            if ((token = strtoken(token, t2, 256)) == 0) {
+                printf("Failed to parse content-range\n");
+            }
+            else {
+                int range_start = 0;
+                int range_end = 0;
+                int content_len = 0;
+
+                int res = sscanf(t2, "%d-%d/%d", &range_start, &range_end, &content_len);
+                if (res == 3 && hi->range_start == range_start && hi->range_end == range_end) {
+                    hi->content_length = content_len;
+                } else {
+                    hi->content_length = 0;
+                }
+            }
+        }
+    }
 
     return 1;
 }
@@ -403,7 +424,8 @@ static int http_parse(HTTP_INFO *hi)
 /*---------------------------------------------------------------------*/
 static int https_init(HTTP_INFO *hi, BOOL https, BOOL verify, netio_t *io)
 {
-    memset(hi, 0, sizeof(HTTP_INFO));
+    ptrdiff_t zero_len = (void *)&hi->ranged - (void *)hi;
+    memset(hi, 0, zero_len);
 
     if(https == TRUE)
     {
@@ -578,7 +600,7 @@ int http_close(HTTP_INFO *hi)
 }
 
 /*---------------------------------------------------------------------*/
-int http_get(HTTP_INFO *hi, char *url, char *response, int size, netio_t *io)
+static int http_get_ranged_impl(HTTP_INFO *hi, char *url, char *response, netio_t *io)
 {
     char        request[1024], err[100];
     char        host[256], port[10], dir[1024];
@@ -628,15 +650,24 @@ int http_get(HTTP_INFO *hi, char *url, char *response, int size, netio_t *io)
         }
     }
 
+    char range_buf[256];
+    if (hi->ranged) {
+        snprintf(range_buf, 256, "Range: bytes=%lu-%lu\r\n",
+            hi->range_start, hi->range_end);
+    }    
+
     /* Send HTTP request. */
     len = snprintf(request, 1024,
             "GET %s HTTP/1.1\r\n"
             "User-Agent: Mozilla/4.0\r\n"
             "Host: %s:%s\r\n"
             "Content-Type: application/json; charset=utf-8\r\n"
+            "%s"
             "Connection: Keep-Alive\r\n"
             "%s\r\n",
-            dir, host, port, hi->request.cookie);
+            dir, host, port,
+            (hi->ranged ? range_buf : ""),
+            hi->request.cookie);
 
     if((ret = https_write(hi, request, len)) != len)
     {
@@ -649,7 +680,7 @@ int http_get(HTTP_INFO *hi, char *url, char *response, int size, netio_t *io)
         return -1;
     }
 
-//  printf("request: %s \r\n\r\n", request);
+    //printf("request: %s \r\n\r\n", request);
 
     hi->response.status = 0;
     hi->response.content_length = 0;
@@ -659,7 +690,7 @@ int http_get(HTTP_INFO *hi, char *url, char *response, int size, netio_t *io)
     hi->header_end = 0;
 
     hi->body = response;
-    hi->body_size = size;
+    hi->body_size = hi->range_end - hi->range_start + 2;
     hi->body_len = 0;
 
     while(1)
@@ -713,6 +744,26 @@ int http_get(HTTP_INFO *hi, char *url, char *response, int size, netio_t *io)
 
     return hi->response.status;
 
+}
+
+int http_get(HTTP_INFO *hi, char *url, char *response, int size, netio_t *io)
+{
+    hi->ranged = 0;
+    hi->range_start = 0;
+    hi->range_end = size - 1;
+    return http_get_ranged_impl(hi, url, response, io);
+}
+
+int http_get_ranged(HTTP_INFO *hi, char *url, char *response, 
+                    size_t range_start, size_t range_end, size_t *content_len,
+                    netio_t *io)
+{
+    hi->ranged = 1;
+    hi->range_start = range_start;
+    hi->range_end = range_end;
+    int ret = http_get_ranged_impl(hi, url, response, io);
+    *content_len = hi->content_length;
+    return ret;
 }
 
 /*---------------------------------------------------------------------*/
