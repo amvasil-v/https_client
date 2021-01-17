@@ -33,3 +33,4 @@
 
 build/*
 bridge_config.h
+out.png

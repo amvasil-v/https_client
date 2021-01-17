@@ -346,13 +346,13 @@ static int http_parse(HTTP_INFO *hi)
                         {
                             if (hi->body_size > (hi->body_len + hi->length))
                             {
-                                strncpy(&(hi->body[hi->body_len]), p1, hi->length);
+                                memcpy(&(hi->body[hi->body_len]), p1, hi->length);
                                 hi->body_len += hi->length;
                                 hi->body[hi->body_len] = 0;
                             }
                             else
                             {
-                                strncpy(&(hi->body[hi->body_len]), p1, hi->body_size - hi->body_len - 1);
+                                memcpy(&(hi->body[hi->body_len]), p1, hi->body_size - hi->body_len - 1);
                                 hi->body_len = hi->body_size - 1;
                                 hi->body[hi->body_len] = 0;
                             }
@@ -378,13 +378,13 @@ static int http_parse(HTTP_INFO *hi)
                         {
                             if (hi->body_size > (hi->body_len + len))
                             {
-                                strncpy(&(hi->body[hi->body_len]), p1, len);
+                                memcpy(&(hi->body[hi->body_len]), p1, len);
                                 hi->body_len += len;
                                 hi->body[hi->body_len] = 0;
                             }
                             else
                             {
-                                strncpy(&(hi->body[hi->body_len]), p1, hi->body_size - hi->body_len - 1);
+                                memcpy(&(hi->body[hi->body_len]), p1, hi->body_size - hi->body_len - 1);
                                 hi->body_len = hi->body_size - 1;
                                 hi->body[hi->body_len] = 0;
                             }

@@ -9,11 +9,12 @@
 #include "esp_bridge.h"
 #include "netio_esp.h"
 #include "bridge_config.h"
+#include "esp_utils.h"
 
 #define NETIO_DEVICE_SOCKETS 1
 #define NETIO_DEVICE_ESP_BRIDGE 2
 
-#define NETIO_DEVICE    NETIO_DEVICE_SOCKETS
+#define NETIO_DEVICE    NETIO_DEVICE_ESP_BRIDGE
 
 static int https_image_download(HTTP_INFO *hi, netio_t *io);
 
@@ -28,6 +29,8 @@ int main(int argc, char *argv[])
 #if NETIO_DEVICE == NETIO_DEVICE_SOCKETS
     netio_t *io = netio_netsocket_create();
 #elif NETIO_DEVICE == NETIO_DEVICE_ESP_BRIDGE
+    esp_debug_set_level(ESP_DBG_ERROR);
+
     netio_t *io = netio_esp_create();
     if (netio_esp_establish_bridge(io, ESP_BRIDGE_ADDRESS, ESP_BRIDGE_PORT)) {
         printf("Failed to establish bridge\n");
@@ -111,7 +114,7 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-#define HTTPS_RANGED_SIZE   12
+#define HTTPS_RANGED_SIZE   1024
 
 static int https_download(HTTP_INFO *hi, netio_t *io, int fd, const char *url)
 {
@@ -125,7 +128,7 @@ static int https_download(HTTP_INFO *hi, netio_t *io, int fd, const char *url)
         if (content_len && range_end >= content_len)
             range_end = content_len - 1;
 
-        printf("Get ranged %d to %d\n", pos, range_end);
+        printf("Get ranged %d to %d from %d\n", pos, range_end, content_len);
         int ret = http_get_ranged(hi, url, buf, pos, range_end, &len, io);
         if ( len == 0) {
             printf("Failed to get ranged HTTPS\n");
@@ -139,7 +142,6 @@ static int https_download(HTTP_INFO *hi, netio_t *io, int fd, const char *url)
         }
 
         size_t write_len = range_end - pos + 1;
-        printf("Write %d\n", write_len);
         ssize_t res = write(fd, buf, write_len);
         if (write_len != res) {
             printf("Write failed\n");
@@ -154,8 +156,10 @@ static int https_download(HTTP_INFO *hi, netio_t *io, int fd, const char *url)
 
 static int https_image_download(HTTP_INFO *hi, netio_t *io)
 {
-    const char *url = "https://raw.githubusercontent.com/amvasil-v/https_client/master/README.md";    
-    int fd = open("out.txt", O_CREAT | O_RDWR | O_TRUNC, 0666);
+    //const char *url = "https://raw.githubusercontent.com/amvasil-v/https_client/master/README.md";
+    //const char *url = "https://xkcd.com/s/0b7742.png";
+    const char *url = "https://imgs.xkcd.com/comics/1_100000th_scale_world.png";
+    int fd = open("out.png", O_CREAT | O_RDWR | O_TRUNC, 0666);
     int ret;
 
     if (fd <= 0) {

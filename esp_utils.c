@@ -1,5 +1,9 @@
 #include "esp_utils.h"
 
+#include <stdio.h>
+
+static uint32_t esp_debug_level = 0;
+
 const char *esp_find_substr(const char *hay, size_t hay_len, const char *needle, size_t needle_len)
 {
     int i,j;
@@ -23,4 +27,20 @@ const char *esp_find_substr(const char *hay, size_t hay_len, const char *needle,
     }
 
     return NULL;
+}
+
+int esp_debug(uint32_t priority, const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+
+    if(priority <= esp_debug_level)
+            vprintf(format, args);
+
+    va_end(args);
+}
+
+void esp_debug_set_level(uint32_t lvl)
+{
+    esp_debug_level = lvl;
 }

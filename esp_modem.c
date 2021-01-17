@@ -73,16 +73,16 @@ int esp_modem_tcp_connect(esp_modem_t *esp, const char *host, const char *port, 
         if (esp_receive_buf_complete(esp->rx_buf, rx_len)) {
             if (esp_find_substr(esp->rx_buf, rx_len, connect_str, strlen(connect_str)) ||
                 esp_find_substr(esp->rx_buf, rx_len, acon_str, strlen(acon_str))) {
-                    printf("[ESP] TCP: connected to %s:%s\n", host, port);
+                    esp_debug(ESP_DBG_WARN, "[ESP] TCP: connected to %s:%s\n", host, port);
                     return 0;
                 }
-            printf("Received invalid response: %s\n", esp->rx_buf);
+            esp_debug(ESP_DBG_ERROR, "Received invalid response: %s\n", esp->rx_buf);
             return -1;
         }
         if (ptr > esp->rx_buf + ESP_MODEM_RX_BUF_SIZE)
             return -1;
     }
-    printf("Connection timeout\n");
+    esp_debug(ESP_DBG_ERROR, "Connection timeout\n");
     return -1;
 }
 
@@ -104,11 +104,11 @@ static int esp_confirm_tcp_send(esp_modem_t *esp)
         rx_len += res;
         confirm = esp_find_substr(esp->rx_buf, rx_len, confirm_str, strlen(confirm_str));
         if (confirm) {
-            printf("[ESP] TX confirmed\n");
+            esp_debug(ESP_DBG_INFO, "[ESP] TX confirmed\n");
             return 0;
         }
     }
-    printf("TX confirm timeout\n");
+    esp_debug(ESP_DBG_ERROR, "TX confirm timeout\n");
     return -1;
 }
 
@@ -140,7 +140,7 @@ int esp_modem_tcp_send(esp_modem_t *esp, const char *buf, size_t len)
                 return -1;
         }
     }
-    printf("TX timeout\n");
+    esp_debug(ESP_DBG_ERROR, "TX timeout\n");
     return -1;
 }
 
@@ -193,7 +193,7 @@ static int esp_modem_receive_data(esp_modem_t *esp, char *out_buf, size_t req_le
     esp->rx_rptr += read_bytes;
 
     if (esp->ipd_len < read_bytes) {
-        printf("Read error: saved ipd_len %d < read_bytes %d\n", esp->ipd_len, read_bytes);
+        esp_debug(ESP_DBG_ERROR, "Read error: saved ipd_len %d < read_bytes %d\n", esp->ipd_len, read_bytes);
         esp_reset_rx(esp);
         return -1;
     }
@@ -209,7 +209,7 @@ static int esp_modem_receive_data(esp_modem_t *esp, char *out_buf, size_t req_le
     int res = esp_bridge_read_timeout(esp->br, esp->rx_wptr, rem_len, timeout);
     if (res <= 0)
     {
-        printf("TCP read data timeout %d\n", res);
+        esp_debug(ESP_DBG_ERROR, "TCP read data timeout %d\n", res);
         return -1;
     }
     read_bytes += res;
@@ -217,7 +217,7 @@ static int esp_modem_receive_data(esp_modem_t *esp, char *out_buf, size_t req_le
     esp->rx_wptr += res;
     esp->rx_rptr = esp->rx_wptr;
     if (esp->ipd_len < res) {
-        printf("Read error: ipd_len < read_bytes\n");
+        esp_debug(ESP_DBG_ERROR, "Read error: ipd_len < read_bytes\n");
         esp_reset_rx(esp);
         return -1;
     }
@@ -251,16 +251,16 @@ static int esp_modem_receive_ipd(esp_modem_t *esp, uint32_t timeout)
         }
         data_ptr = (char *)esp_modem_get_ipd(ipd_ptr + strlen(esp_modem_ipd_str), &ipd_len);
         if (!data_ptr) {
-            printf("Failed to parse IPD\n");
+            esp_debug(ESP_DBG_ERROR, "Failed to parse IPD\n");
             return -1;
         }
-        printf("[ESP] Received IPD %d\n", ipd_len);
+        esp_debug(ESP_DBG_INFO, "[ESP] Received IPD %d\n", ipd_len);
         esp->rx_rptr = data_ptr;       
         esp->ipd_len = ipd_len;
         return 0;
     };
 
-    printf("TCP IPD read timeout\n");
+    esp_debug(ESP_DBG_ERROR, "TCP IPD read timeout\n");
     return -1;
 }
 
@@ -284,7 +284,7 @@ int esp_modem_tcp_receive(esp_modem_t *esp, char *buf, size_t len, uint32_t time
         return esp_modem_receive_data(esp, buf, len, timeout);
     }
 
-    printf("TCP read timeout\n");
+    esp_debug(ESP_DBG_ERROR, "TCP read timeout\n");
     return -1;
 }
 
@@ -296,7 +296,7 @@ int esp_modem_tcp_close(esp_modem_t *esp)
     int res = esp_bridge_write(esp->br, cipclose_str, strlen(cipclose_str));
     if (res < 0)
         return -1;
-    printf("[ESP] Sent CIPCLOSE\n");
+    esp_debug(ESP_DBG_WARN, "[ESP] Sent CIPCLOSE\n");
     return 0;
 }
 
