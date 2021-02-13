@@ -3,8 +3,9 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include "https.h"
+#include <unistd.h>
 
+#include "https.h"
 #include "netio_netsocket.h"
 #include "esp_bridge.h"
 #include "netio_esp.h"
@@ -116,11 +117,19 @@ int main(int argc, char *argv[])
 
 #define HTTPS_RANGED_SIZE   1024
 
+#define HTTPS_PRINT_VERBOSE     0
+#define HTTPS_PRINT_PROGRESS    1
+#define HTTPS_PRINT_PROGRESS_BARS   30
+
 static int https_download(HTTP_INFO *hi, netio_t *io, int fd, const char *url)
 {
     char buf[HTTPS_RANGED_SIZE+1];
     size_t content_len = 0;
     size_t pos = 0;
+#if HTTPS_PRINT_PROGRESS
+    int curr_progress = 0;
+    int progress_it;
+#endif
 
     while (content_len == 0 || pos < content_len) { 
         size_t range_end = pos + HTTPS_RANGED_SIZE - 1;
@@ -128,7 +137,9 @@ static int https_download(HTTP_INFO *hi, netio_t *io, int fd, const char *url)
         if (content_len && range_end >= content_len)
             range_end = content_len - 1;
 
+#if HTTPS_PRINT_VERBOSE
         printf("Get ranged %d to %d from %d\n", pos, range_end, content_len);
+#endif
         int ret = http_get_ranged(hi, url, buf, pos, range_end, &len, io);
         if ( len == 0) {
             printf("Failed to get ranged HTTPS\n");
@@ -140,6 +151,28 @@ static int https_download(HTTP_INFO *hi, netio_t *io, int fd, const char *url)
             printf("Invalid content len %d\n", len);
             return -1;
         }
+
+#if HTTPS_PRINT_PROGRESS
+        int progress = (int)((float)(range_end + 1) / (float)content_len * HTTPS_PRINT_PROGRESS_BARS);
+        if (curr_progress == 0) {
+            printf("   [");
+            for (progress_it = 0; progress_it < HTTPS_PRINT_PROGRESS_BARS - 1; progress_it++) {
+                printf("-");
+            }
+            printf("]\n=>  ");
+            curr_progress = 1;
+        }
+        if (progress > curr_progress) {
+            for (progress_it = curr_progress; progress_it < progress; progress_it++) {
+                printf(".");
+            }
+            curr_progress = progress;
+        }
+        if (progress == HTTPS_PRINT_PROGRESS_BARS) {
+            printf(" Done!\n");
+        }
+        fflush(stdout);
+#endif
 
         size_t write_len = range_end - pos + 1;
         ssize_t res = write(fd, buf, write_len);
@@ -158,7 +191,7 @@ static int https_image_download(HTTP_INFO *hi, netio_t *io)
 {
     //const char *url = "https://raw.githubusercontent.com/amvasil-v/https_client/master/README.md";
     //const char *url = "https://xkcd.com/s/0b7742.png";
-    const char *url = "https://imgs.xkcd.com/comics/1_100000th_scale_world.png";
+    const char *url = "https://imgs.xkcd.com/comics/normal_conversation.png";
     int fd = open("out.png", O_CREAT | O_RDWR | O_TRUNC, 0666);
     int ret;
 
