@@ -11,13 +11,14 @@
 #include "netio_esp.h"
 #include "bridge_config.h"
 #include "esp_utils.h"
+#include "json_parser.h"
 
 #define NETIO_DEVICE_SOCKETS 1
 #define NETIO_DEVICE_ESP_BRIDGE 2
 
-#define NETIO_DEVICE    NETIO_DEVICE_ESP_BRIDGE
+#define NETIO_DEVICE    NETIO_DEVICE_SOCKETS
 
-static int https_image_download(HTTP_INFO *hi, netio_t *io);
+static int https_image_download(HTTP_INFO *hi, netio_t *io, const char *url);
 
 int main(int argc, char *argv[])
 {
@@ -25,7 +26,7 @@ int main(int argc, char *argv[])
     char data[1024], response[4096];
     int i, ret, size;
 
-    HTTP_INFO hi;
+    HTTP_INFO hi;    
 
 #if NETIO_DEVICE == NETIO_DEVICE_SOCKETS
     netio_t *io = netio_netsocket_create();
@@ -43,24 +44,91 @@ int main(int argc, char *argv[])
 #error "Invalid NETIO_DEVICE"
 #endif
 
-//#define HTTP_LIB_USE
+#define HTTP_LIB_USE
 #ifdef HTTP_LIB_USE
     // Init http session. verify: check the server CA cert.
     http_init(&hi, TRUE, io);
 
-    //url = "http://kspt.icc.spbstu.ru/en/";
-    //url = "http://httpbin.org/ip";
-    //url = "https://xkcd.com/1/info.0.json";
-
-    ret = http_get(&hi, url, response, sizeof(response), io);
+    const char *main_url = "https://xkcd.com/info.0.json";
+    int status = 0;
+    ret = http_get(&hi, main_url, response, sizeof(response), io);
     printf("return code: %d \n", ret);
-    printf("return body:\n%s\n", response);
 
+    if (ret != 200)
+    {
+        printf("HTTPS request failed\n");
+        status = -1;
+        goto https_end;
+    }
+
+    int num_comics = -1;
+    if (json_parser_get_number(response, "num", &num_comics)) {
+        printf("Failed to parse json\n");
+        status = -1;
+        goto https_end;
+    }
+    if (num_comics <= 0) {
+        printf("Invalid num_comics %d\n", num_comics);
+        status = -1;
+        goto https_end;
+    }
+    printf("Num comics: %d\n", num_comics);
+    srand(time(NULL));
+    int selected = rand() % num_comics + 1;
+    printf("Selected: %d\n", selected);
+
+    char tmp[256];
+    sprintf(tmp, "https://xkcd.com/%d/info.0.json", selected);
+
+    ret = http_get(&hi, tmp, response, sizeof(response), io);
+    printf("return code: %d \n", ret);
+    if (ret != 200)
+    {
+        printf("HTTPS request failed\n");
+        status = -1;
+        goto https_end;
+    }
+
+    if (json_parser_get_string(response, "img", tmp, 256)) {
+        printf("Failed to get img URL from json\n");
+        status = -1;
+        goto https_end;
+    }
+
+    const char *image_url = tmp;
+    printf("Image URL: %s\n", image_url);
+
+    memset(response, 0, sizeof(response));
+    ret = http_get_header(&hi, image_url, response, sizeof(response), io);
+    printf("return code: %d \n", ret);
+    if (ret != 200)
+    {
+        printf("HTTPS request failed\n");
+        status = -1;
+        goto https_end;
+    }
+
+    int content_len = hi.response.content_length;
+    printf("Image size: %d\n", content_len);
+    printf("Response size: %d\n", strlen(response));
+
+    if (content_len > 150000) {
+        printf("Image too big\n");
+        status = -1;
+        goto https_end;
+    }
+
+    https_image_download(&hi, io, image_url);
+
+https_end:
     http_close(&hi);
     io->disconnect(io);
+    if (status < 0) {
+        return status;
+    }
 #endif
 
-#define HTTPS_IMG_DOWNLOAD
+//#define HTTPS_IMG_DOWNLOAD
 #ifdef HTTPS_IMG_DOWNLOAD
     http_init(&hi, TRUE, io);
     https_image_download(&hi, io);
@@ -187,11 +255,8 @@ static int https_download(HTTP_INFO *hi, netio_t *io, int fd, const char *url)
     return 0;
 }
 
-static int https_image_download(HTTP_INFO *hi, netio_t *io)
+static int https_image_download(HTTP_INFO *hi, netio_t *io, const char *url)
 {
-    //const char *url = "https://raw.githubusercontent.com/amvasil-v/https_client/master/README.md";
-    //const char *url = "https://xkcd.com/s/0b7742.png";
-    const char *url = "https://imgs.xkcd.com/comics/normal_conversation.png";
     int fd = open("out.png", O_CREAT | O_RDWR | O_TRUNC, 0666);
     int ret;
 

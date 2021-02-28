@@ -122,7 +122,7 @@ static int mbedtls_net_connect_timeout( mbedtls_net_context *ctx, const char *ho
 static int netio_netsocket_send(void *ctx, const unsigned char *buf, size_t len)
 {
     netio_t *io = (netio_t *)ctx;
-    printf("Send %d bytes\n", len);
+    //printf("Send %d bytes\n", len);
     return mbedtls_net_send(io->ctx, buf, len);
 }
 
@@ -130,7 +130,7 @@ static int netio_netsocket_recv_timeout(void *ctx, unsigned char *buf, size_t le
 {
     netio_t *io = (netio_t *)ctx;
     int res = mbedtls_net_recv_timeout(io->ctx, buf, len, timeout);
-    printf("Recv %d bytes\n", len);
+    //printf("Recv %d bytes\n", len);
     return res;
 }
 

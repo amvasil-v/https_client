@@ -11,7 +11,8 @@ set(SOURCE_FILES
     esp_bridge.c
     netio_esp.c
     esp_modem.c
-    esp_utils.c)
+    esp_utils.c
+    json_parser.c)
 
 include_directories(.)
 include_directories(include)
@@ -27,3 +28,6 @@ target_link_libraries(https_client mbedcrypto)
 target_link_libraries(https_client pthread)
 
 add_subdirectory(tests)
+
+add_subdirectory(cJSON)
+target_link_libraries(https_client cjson)

@@ -2597,6 +2597,4 @@
 
 #include "check_config.h"
 
-#define mbedtls_printf printf
-
 #endif /* MBEDTLS_CONFIG_H */

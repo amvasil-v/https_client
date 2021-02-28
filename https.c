@@ -31,6 +31,35 @@ static int https_connect(HTTP_INFO *hi, char *host, char *port);
 static int https_write(HTTP_INFO *hi, char *buffer, int len);
 static int https_read(HTTP_INFO *hi, char *buffer, int len);
 
+/* Change to a number between 1 and 4 to debug the TLS connection */
+#define DEBUG_LEVEL 0
+
+#if DEBUG_LEVEL > 0
+#include "mbedtls/debug.h"
+#endif
+
+#if DEBUG_LEVEL > 0
+    /**
+     * Debug callback for mbed TLS
+     * Just prints on the USB serial port
+     */
+    static void my_debug(void *ctx, int level, const char *file, int line,
+                         const char *str)
+    {
+        const char *p, *basename;
+        (void) ctx;
+
+        /* Extract basename from file */
+        for(p = basename = file; *p != '\0'; p++) {
+            if(*p == '/' || *p == '\\') {
+                basename = p + 1;
+            }
+        }
+
+        mbedtls_printf("%s:%04d: |%d| %s", basename, line, level, str);
+    }
+#endif
+
 /*---------------------------------------------------------------------------*/
 char *strtoken(char *src, char *dst, int size)
 {
@@ -271,6 +300,9 @@ static int http_parse(HTTP_INFO *hi)
                     else
                     {
                         hi->length = hi->response.content_length;
+                        if (hi->header_only) {
+                            hi->length = 0;
+                        }
                     }
                 }
 
@@ -439,10 +471,13 @@ static int https_init(HTTP_INFO *hi, BOOL https, BOOL verify, netio_t *io)
 
     mbedtls_ssl_set_bio(&hi->tls.ssl, io, io->send, NULL, io->recv_timeout);
 
+    #if DEBUG_LEVEL > 0
+        mbedtls_ssl_conf_dbg(&hi->tls.conf, my_debug, NULL);
+        mbedtls_debug_set_threshold(DEBUG_LEVEL);
+    #endif
+
     hi->tls.verify = verify;
     hi->url.https = https;
-
-//  printf("https_init ... \n");
 
     return 0;
 }
@@ -479,6 +514,7 @@ static int https_connect(HTTP_INFO *hi, char *host, char *port)
 
     if(https == 1)
     {
+        //printf("Start mbedtls configure\n");
         mbedtls_entropy_init( &hi->tls.entropy );
 
         ret = mbedtls_ctr_drbg_seed( &hi->tls.ctr_drbg, mbedtls_entropy_func, &hi->tls.entropy, NULL, 0);
@@ -487,12 +523,14 @@ static int https_connect(HTTP_INFO *hi, char *host, char *port)
             return ret;
         }
 
-        ca_crt_rsa[ca_crt_rsa_size - 1] = 0;
-        ret = mbedtls_x509_crt_parse(&hi->tls.cacert, (uint8_t *)ca_crt_rsa, ca_crt_rsa_size);
+       // printf("Done mbedtls drbg_seed\n");
+
+        ret = mbedtls_x509_crt_parse(&hi->tls.cacert, (uint8_t *)ca_cert_globalsign, strlen(ca_cert_globalsign) + 1);
         if( ret != 0 )
         {
             return ret;
         }
+       // printf("Done mbedtls crt_parse\n");
 
         ret = mbedtls_ssl_config_defaults( &hi->tls.conf,
                                            MBEDTLS_SSL_IS_CLIENT,
@@ -503,9 +541,11 @@ static int https_connect(HTTP_INFO *hi, char *host, char *port)
             return ret;
         }
 
+        //printf("Done mbedtls config_defaults\n");
+
         /* OPTIONAL is not optimal for security,
          * but makes interop easier in this simplified example */
-        mbedtls_ssl_conf_authmode( &hi->tls.conf, MBEDTLS_SSL_VERIFY_OPTIONAL );
+        mbedtls_ssl_conf_authmode( &hi->tls.conf, MBEDTLS_SSL_VERIFY_NONE );
         mbedtls_ssl_conf_ca_chain( &hi->tls.conf, &hi->tls.cacert, NULL );
         mbedtls_ssl_conf_rng( &hi->tls.conf, mbedtls_ctr_drbg_random, &hi->tls.ctr_drbg );
         mbedtls_ssl_conf_read_timeout( &hi->tls.conf, 5000 );
@@ -516,11 +556,15 @@ static int https_connect(HTTP_INFO *hi, char *host, char *port)
             return ret;
         }
 
+        //printf("Done mbedtls setup\n");
+
         ret = mbedtls_ssl_set_hostname( &hi->tls.ssl, host );
         if( ret != 0 )
         {
             return ret;
         }
+
+        printf("Done mbedtls configure\n");
     }
 
     ret = hi->tls.io->connect(hi->tls.io, host, port);
@@ -658,13 +702,14 @@ static int http_get_ranged_impl(HTTP_INFO *hi, char *url, char *response, netio_
 
     /* Send HTTP request. */
     len = snprintf(request, 1024,
-            "GET %s HTTP/1.1\r\n"
+            "%s %s HTTP/1.1\r\n"
             "User-Agent: Mozilla/4.0\r\n"
             "Host: %s:%s\r\n"
             "Content-Type: application/json; charset=utf-8\r\n"
             "%s"
             "Connection: Keep-Alive\r\n"
             "%s\r\n",
+            hi->header_only ? "HEAD" : "GET",
             dir, host, port,
             (hi->ranged ? range_buf : ""),
             hi->request.cookie);
@@ -746,11 +791,21 @@ static int http_get_ranged_impl(HTTP_INFO *hi, char *url, char *response, netio_
 
 }
 
+int http_get_header(HTTP_INFO *hi, char *url, char *response, int size, netio_t *io)
+{
+    hi->ranged = 0;
+    hi->range_start = 0;
+    hi->range_end = size - 1;
+    hi->header_only = 1;
+    return http_get_ranged_impl(hi, url, response, io);
+}
+
 int http_get(HTTP_INFO *hi, char *url, char *response, int size, netio_t *io)
 {
     hi->ranged = 0;
     hi->range_start = 0;
     hi->range_end = size - 1;
+    hi->header_only = 0;
     return http_get_ranged_impl(hi, url, response, io);
 }
 
@@ -761,6 +816,7 @@ int http_get_ranged(HTTP_INFO *hi, char *url, char *response,
     hi->ranged = 1;
     hi->range_start = range_start;
     hi->range_end = range_end;
+    hi->header_only = 0;
     int ret = http_get_ranged_impl(hi, url, response, io);
     *content_len = hi->content_length;
     return ret;
